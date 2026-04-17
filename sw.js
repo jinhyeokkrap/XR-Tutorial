@@ -1,8 +1,33 @@
-// 앱 설치 조건을 만족시키기 위한 최소한의 서비스 워커
+// 캐시 버전을 v2로 올려 이전(v1) 캐시를 무효화합니다.
+const CACHE_NAME = 'xr-tutorial-v2';
+const FILES_TO_CACHE = [
+  './',
+  './index.html',
+  './manifest.json',
+  './icon-192.png',
+  './icon-512.png'
+];
+
 self.addEventListener('install', (e) => {
-  console.log('[Service Worker] Installed');
+  e.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.addAll(FILES_TO_CACHE)));
+  self.skipWaiting();
+});
+
+// 핵심! 이전 버전의 캐시를 찾아 자동으로 삭제하는 로직입니다.
+self.addEventListener('activate', (e) => {
+  e.waitUntil(
+    caches.keys().then((keyList) => {
+      return Promise.all(keyList.map((key) => {
+        if (key !== CACHE_NAME) {
+          console.log('[ServiceWorker] Removing old cache', key);
+          return caches.delete(key);
+        }
+      }));
+    })
+  );
+  self.clients.claim();
 });
 
 self.addEventListener('fetch', (e) => {
-  // 크롬 PWA 설치 요구 조건을 충족하기 위해 fetch 이벤트를 가로채기만 합니다.
+  e.respondWith(caches.match(e.request).then((response) => response || fetch(e.request)));
 });
