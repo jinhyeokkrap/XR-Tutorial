@@ -4,6 +4,21 @@
     <title>XR Tutorial - Pinch, Drag & Scale</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
     <link type="text/css" rel="stylesheet" href="https://xrblocks.github.io/css/xr.css" />
+    
+    <!-- PWA 앱 설치를 위한 Manifest 및 Service Worker 연결 (복구됨) -->
+    <link rel="manifest" href="manifest.json">
+    <script>
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', function() {
+          navigator.serviceWorker.register('./sw.js').then(function(registration) {
+            console.log('ServiceWorker registration successful');
+          }).catch(function(err) {
+            console.log('ServiceWorker registration failed: ', err);
+          });
+        });
+      }
+    </script>
+
     <script>
       window.litDisableBundleWarning = true;
     </script>
@@ -270,8 +285,16 @@
           if (!intersection) {
             const camera = xb.core.camera;
             const raycaster = new THREE.Raycaster();
-            // 화면(사용자 시선)의 정중앙에서 레이저를 쏩니다.
-            raycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
+            
+            // [핵심 수정] WebXR 양안 카메라 환경에서 오작동하는 setFromCamera 대신,
+            // 기기(헤드셋)의 정확한 3D 월드 위치와 정면 방향(벡터)을 직접 추출하여 레이저를 발사합니다.
+            const headPosition = new THREE.Vector3();
+            const headDirection = new THREE.Vector3();
+            camera.getWorldPosition(headPosition);
+            camera.getWorldDirection(headDirection);
+            
+            raycaster.set(headPosition, headDirection);
+            
             const intersects = raycaster.intersectObject(this.activeObject, true);
             if (intersects.length > 0) {
               intersection = intersects[0];
