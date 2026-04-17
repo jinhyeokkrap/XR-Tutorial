@@ -258,26 +258,8 @@
 
           const controller = event.target;
           
-          // 1. 핸드 포인팅(손가락 레이저)이 정확히 맞았는지 먼저 확인
+          // 오직 컨트롤러(손) 중심의 기본 객체 선택 방식만 유지합니다.
           let intersection = xb.core.user.select(this.activeObject, controller);
-
-          // 2. 만약 손가락 레이저가 구슬을 빗겨나갔다면 -> 아이 트래킹(시선)으로 폴백!
-          if (!intersection) {
-            // 사용자의 기기(카메라) 3D 월드 좌표와 바라보는 방향을 가져옵니다.
-            const headPosition = new THREE.Vector3();
-            const headDirection = new THREE.Vector3();
-            xb.core.camera.getWorldPosition(headPosition);
-            xb.core.camera.getWorldDirection(headDirection);
-
-            // 카메라 정중앙에서 레이저를 쏘아 구슬과 부딪혔는지 검사합니다.
-            const raycaster = new THREE.Raycaster();
-            raycaster.set(headPosition, headDirection);
-            
-            const intersects = raycaster.intersectObject(this.activeObject, true);
-            if (intersects.length > 0) {
-              intersection = intersects[0]; // 시선이 구슬을 향하고 있다면 성공으로 간주!
-            }
-          }
 
           if (intersection) {
             if (this.currentStep === 1) {
@@ -603,14 +585,12 @@
         const options = new xb.Options({
           antialias: false,
           stencil: false,
-          // [핵심 해결] 사라졌던 권한 요청 배열을 명시적으로 완벽히 복구했습니다.
-          optionalFeatures: ['hand-tracking', 'eye-tracking'] 
+          // 확실하게 핸드 트래킹 권한만 유지합니다.
+          optionalFeatures: ['hand-tracking'] 
         });
 
-        // 만약을 대비해 권한이 강제로라도 포함되도록 확실히 주입합니다.
         if (!options.optionalFeatures) options.optionalFeatures = [];
         if (!options.optionalFeatures.includes('hand-tracking')) options.optionalFeatures.push('hand-tracking');
-        if (!options.optionalFeatures.includes('eye-tracking')) options.optionalFeatures.push('eye-tracking');
 
         options.enableHands();
         options.hands.visualization = true;
