@@ -58,7 +58,7 @@
 
       class XRTutorialScript extends xb.Script {
         init() {
-          // 1. 하프 패스스루 환경 구성 (더 어둡게 만들기 위해 depthWrite 비활성화 등 최적화)
+          // 1. 하프 패스스루 환경 구성
           this.dimmingSphere = new THREE.Mesh(
             new THREE.SphereGeometry(10, 32, 32),
             new THREE.MeshBasicMaterial({
@@ -69,9 +69,11 @@
               depthWrite: false
             })
           );
+          // [해결포인트 1] 검은색 구체가 레이저를 막지 않도록 충돌 감지를 완전히 끕니다.
+          this.dimmingSphere.raycast = function() {};
           this.add(this.dimmingSphere);
 
-          // 1.5. 레이캐스트(핸드 레이저) 거리 제한용 투명 받침대 (Depth Catcher)
+          // 1.5. 거리감지용 투명 벽
           this.rayCatcher = new THREE.Mesh(
             new THREE.SphereGeometry(xb.core.user.objectDistance + 0.2, 32, 32),
             new THREE.MeshBasicMaterial({
@@ -80,6 +82,7 @@
               side: THREE.BackSide 
             })
           );
+          this.rayCatcher.raycast = function() {}; // 이것도 객체 선택에 방해되지 않도록 끕니다.
           this.rayCatcher.position.set(0, xb.core.user.height, 0); 
           this.add(this.rayCatcher);
 
@@ -89,7 +92,7 @@
           dirLight.position.set(2, 5, 2);
           this.add(dirLight);
 
-          // 3. 상태 관리 변수 초기화
+          // 3. 상태 관리 변수
           this.currentStep = 0; 
           this.stepState = 'PRE_INTRO_DELAY'; 
           this.taskCount = 0; 
@@ -110,8 +113,6 @@
           this.initialObjectScale = 1.0;
 
           this.audioCtx = null;
-
-          // 4. UI 텍스트 설정
           this.setupTexts();
         }
 
@@ -275,21 +276,24 @@
 
           const controller = event.target;
           
-          // 1. 핸드 트래킹(컨트롤러)을 기준으로 객체를 가리켰는지 확인
+          // 1. 기본 핸드 포인팅 먼저 검사
           let intersection = xb.core.user.select(this.activeObject, controller);
-          
-          // 2. 만약 손으로 가리키지 않았다면 -> 시선(카메라 중앙)으로 쳐다보고 있는지 추가 검사
+
+          // [해결포인트 2] 손가락 레이저가 빗나갔을 경우, '사용자의 카메라(시선)' 정중앙에서 레이저를 쏘는 완벽한 폴백(Fallback) 로직
           if (!intersection) {
-            const camera = xb.core.camera;
-            const raycaster = new THREE.Raycaster();
-            
+            // WebXR 렌더링 중인 실제 카메라 객체를 가져옵니다.
+            const xrManager = xb.core.renderer.xr;
+            const camera = xrManager.isPresenting ? xrManager.getCamera(xb.core.camera) : xb.core.camera;
+
             const headPosition = new THREE.Vector3();
             const headDirection = new THREE.Vector3();
             camera.getWorldPosition(headPosition);
             camera.getWorldDirection(headDirection);
-            
+
+            const raycaster = new THREE.Raycaster();
             raycaster.set(headPosition, headDirection);
             
+            // 시선 레이저와 구슬(activeObject)의 충돌만 검사합니다.
             const intersects = raycaster.intersectObject(this.activeObject, true);
             if (intersects.length > 0) {
               intersection = intersects[0];
@@ -619,18 +623,8 @@
       document.addEventListener('DOMContentLoaded', async function () {
         const options = new xb.Options({
           antialias: false,
-          stencil: false,
-          // [핵심 변경 사항] 기기에게 시선 포인팅(Eye Tracking) 권한을 명시적으로 요청합니다.
-          optionalFeatures: ['eye-tracking'] 
+          stencil: false
         });
-
-        // xrblocks 내부 로직 우회를 대비해 배열에 확실하게 추가
-        if (!options.optionalFeatures) {
-          options.optionalFeatures = [];
-        }
-        if (!options.optionalFeatures.includes('eye-tracking')) {
-          options.optionalFeatures.push('eye-tracking');
-        }
 
         options.enableHands();
         options.hands.visualization = true;
