@@ -58,7 +58,7 @@
 
       class XRTutorialScript extends xb.Script {
         init() {
-          // 1. 하프 패스스루 환경 구성
+          // 1. 하프 패스스루 환경 구성 (디밍 효과 유지)
           this.dimmingSphere = new THREE.Mesh(
             new THREE.SphereGeometry(10, 32, 32),
             new THREE.MeshBasicMaterial({
@@ -69,22 +69,9 @@
               depthWrite: false
             })
           );
-          // [해결포인트 1] 검은색 구체가 레이저를 막지 않도록 충돌 감지를 완전히 끕니다.
-          this.dimmingSphere.raycast = function() {};
+          // 배경이 레이저와 상호작용하지 않도록 물리적 층(layer) 분리
+          this.dimmingSphere.layers.disable(0);
           this.add(this.dimmingSphere);
-
-          // 1.5. 거리감지용 투명 벽
-          this.rayCatcher = new THREE.Mesh(
-            new THREE.SphereGeometry(xb.core.user.objectDistance + 0.2, 32, 32),
-            new THREE.MeshBasicMaterial({
-              colorWrite: false, 
-              depthWrite: false,
-              side: THREE.BackSide 
-            })
-          );
-          this.rayCatcher.raycast = function() {}; // 이것도 객체 선택에 방해되지 않도록 끕니다.
-          this.rayCatcher.position.set(0, xb.core.user.height, 0); 
-          this.add(this.rayCatcher);
 
           // 2. 조명 설정
           this.add(new THREE.HemisphereLight(0xffffff, 0x444444, 2.0));
@@ -276,29 +263,8 @@
 
           const controller = event.target;
           
-          // 1. 기본 핸드 포인팅 먼저 검사
+          // [롤백 완료] 오직 컨트롤러(손) 중심의 기본 객체 선택 방식만 유지합니다. (가장 안정적)
           let intersection = xb.core.user.select(this.activeObject, controller);
-
-          // [해결포인트 2] 손가락 레이저가 빗나갔을 경우, '사용자의 카메라(시선)' 정중앙에서 레이저를 쏘는 완벽한 폴백(Fallback) 로직
-          if (!intersection) {
-            // WebXR 렌더링 중인 실제 카메라 객체를 가져옵니다.
-            const xrManager = xb.core.renderer.xr;
-            const camera = xrManager.isPresenting ? xrManager.getCamera(xb.core.camera) : xb.core.camera;
-
-            const headPosition = new THREE.Vector3();
-            const headDirection = new THREE.Vector3();
-            camera.getWorldPosition(headPosition);
-            camera.getWorldDirection(headDirection);
-
-            const raycaster = new THREE.Raycaster();
-            raycaster.set(headPosition, headDirection);
-            
-            // 시선 레이저와 구슬(activeObject)의 충돌만 검사합니다.
-            const intersects = raycaster.intersectObject(this.activeObject, true);
-            if (intersects.length > 0) {
-              intersection = intersects[0];
-            }
-          }
 
           if (intersection) {
             if (this.currentStep === 1) {
