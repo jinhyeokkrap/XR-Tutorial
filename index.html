@@ -55,7 +55,7 @@
 
       class XRTutorialScript extends xb.Script {
         init() {
-          // 1. 하프 패스스루 환경 구성 (가장 순수하고 에러 없는 형태)
+          // 원래 작동하던 기본 디밍 구체 (Opacity 0.7 제한)
           this.dimmingSphere = new THREE.Mesh(
             new THREE.SphereGeometry(10, 32, 32),
             new THREE.MeshBasicMaterial({
@@ -68,15 +68,15 @@
           );
           this.add(this.dimmingSphere);
 
-          // 2. 조명 설정
+          // 기본 조명 설정
           this.add(new THREE.HemisphereLight(0xffffff, 0x444444, 2.0));
           const dirLight = new THREE.DirectionalLight(0xffffff, 3);
           dirLight.position.set(2, 5, 2);
           this.add(dirLight);
 
-          // 3. 상태 관리 변수
+          // 상태 변수 초기화
           this.currentStep = 0; 
-          this.stepState = 'PRE_INTRO_DELAY'; 
+          this.stepState = 'INTRO_DIMMING'; 
           this.taskCount = 0; 
           
           this.activeObject = null;
@@ -258,7 +258,7 @@
 
           const controller = event.target;
           
-          // 오직 컨트롤러(손) 중심의 기본 객체 선택 방식만 유지합니다.
+          // 순수한 원본 핸드 트래킹 객체 선택 로직
           let intersection = xb.core.user.select(this.activeObject, controller);
 
           if (intersection) {
@@ -320,24 +320,17 @@
         }
 
         update() {
-          if (!xb.core.renderer.xr.isPresenting) return;
-
           const dt = Math.min(xb.getDeltaTime(), 0.05);
 
           // --------------------------------------------------
-          // 0단계: 앱 시작 인트로 시퀀스
+          // 0단계: 기본 인트로 시퀀스 (원래 타이밍으로 롤백)
           // --------------------------------------------------
           if (this.currentStep === 0) {
             this.animTimer += dt;
             
-            if (this.stepState === 'PRE_INTRO_DELAY') {
-              if (this.animTimer >= 1.0) {
-                this.stepState = 'INTRO_DIMMING';
-                this.animTimer = 0;
-              }
-            }
-            else if (this.stepState === 'INTRO_DIMMING') {
-              this.dimmingSphere.material.opacity = Math.min(0.95, easeInOut(this.animTimer / 1.0) * 0.95);
+            if (this.stepState === 'INTRO_DIMMING') {
+              // 초기 설정인 최대 불투명도 0.7로 원복
+              this.dimmingSphere.material.opacity = Math.min(0.7, easeInOut(this.animTimer / 1.0) * 0.7);
               
               if (this.animTimer >= 1.0) {
                 this.stepState = 'INTRO_GAP1';
@@ -582,15 +575,11 @@
       }
 
       document.addEventListener('DOMContentLoaded', async function () {
+        // 가장 안정적으로 작동했던 순정 옵션 세팅
         const options = new xb.Options({
           antialias: false,
-          stencil: false,
-          // 확실하게 핸드 트래킹 권한만 유지합니다.
-          optionalFeatures: ['hand-tracking'] 
+          stencil: false
         });
-
-        if (!options.optionalFeatures) options.optionalFeatures = [];
-        if (!options.optionalFeatures.includes('hand-tracking')) options.optionalFeatures.push('hand-tracking');
 
         options.enableHands();
         options.hands.visualization = true;
