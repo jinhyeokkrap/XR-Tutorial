@@ -1,7 +1,21 @@
 <!doctype html>
 <html lang="en">
   <head>
+    <!-- 1. Manifest 연결 -->
     <link rel="manifest" href="manifest.json">
+    <!-- 2. Service Worker 등록 스크립트 -->
+    <script>
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', function() {
+          navigator.serviceWorker.register('./sw.js').then(function(registration) {
+            console.log('ServiceWorker registration successful');
+          }, function(err) {
+            console.log('ServiceWorker registration failed: ', err);
+          });
+        });
+      }
+    </script>
+
     <title>XR Tutorial - Pinch, Drag & Scale</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
     <link type="text/css" rel="stylesheet" href="https://xrblocks.github.io/css/xr.css" />
