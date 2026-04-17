@@ -1,21 +1,6 @@
 <!doctype html>
 <html lang="en">
   <head>
-    <!-- 1. Manifest 연결 -->
-    <link rel="manifest" href="manifest.json">
-    <!-- 2. Service Worker 등록 스크립트 -->
-    <script>
-      if ('serviceWorker' in navigator) {
-        window.addEventListener('load', function() {
-          navigator.serviceWorker.register('./sw.js').then(function(registration) {
-            console.log('ServiceWorker registration successful');
-          }, function(err) {
-            console.log('ServiceWorker registration failed: ', err);
-          });
-        });
-      }
-    </script>
-
     <title>XR Tutorial - Pinch, Drag & Scale</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
     <link type="text/css" rel="stylesheet" href="https://xrblocks.github.io/css/xr.css" />
@@ -56,22 +41,34 @@
         return x * x * (3.0 - 2.0 * x);
       }
 
-      /**
-       * XR 기기 첫 사용자를 위한 인트로, 핀치, 드래그, 스케일 튜토리얼 스크립트
-       */
       class XRTutorialScript extends xb.Script {
         init() {
-          // 1. 하프 패스스루 환경 구성
+          // 1. 하프 패스스루 환경 구성 (더 어둡게 만들기 위해 depthWrite 비활성화 등 최적화)
           this.dimmingSphere = new THREE.Mesh(
             new THREE.SphereGeometry(10, 32, 32),
             new THREE.MeshBasicMaterial({
               color: 0x000000,
               transparent: true,
               opacity: 0.0, 
-              side: THREE.BackSide
+              side: THREE.BackSide,
+              depthWrite: false
             })
           );
           this.add(this.dimmingSphere);
+
+          // 1.5. 레이캐스트(핸드 레이저) 거리 제한용 투명 받침대 (Depth Catcher)
+          // 손가락이 구슬을 빗겨나갔을 때 레이저가 무한대 공간으로 날아가는 현상을 방지합니다.
+          // 사용자 반경(구슬보다 20cm 뒤)에 완벽히 투명한 구체를 둘러서, 레이저가 항상 구슬 근처 깊이에서 멈추도록 원근감을 교정합니다.
+          this.rayCatcher = new THREE.Mesh(
+            new THREE.SphereGeometry(xb.core.user.objectDistance + 0.2, 32, 32),
+            new THREE.MeshBasicMaterial({
+              colorWrite: false, // 화면에 그리지 않음 (완벽한 투명)
+              depthWrite: false,
+              side: THREE.BackSide // 안쪽에서 레이저를 맞아야 하므로 BackSide
+            })
+          );
+          this.rayCatcher.position.set(0, xb.core.user.height, 0); // 사용자 시야 중심에 배치
+          this.add(this.rayCatcher);
 
           // 2. 조명 설정
           this.add(new THREE.HemisphereLight(0xffffff, 0x444444, 2.0));
@@ -81,10 +78,9 @@
 
           // 3. 상태 관리 변수 초기화
           this.currentStep = 0; 
-          this.stepState = 'PRE_INTRO_DELAY'; // 시작 시 1초 대기 상태
+          this.stepState = 'PRE_INTRO_DELAY'; 
           this.taskCount = 0; 
           
-          // 객체 애니메이션 관련 상태
           this.activeObject = null;
           this.innerRing = null;
           this.objectState = 'NONE'; 
@@ -93,7 +89,6 @@
           this.baseY = 0; 
           this.floatingTimer = 0; 
           
-          // 단계별 제어 변수
           this.draggingController = null;
           this.pinchingControllers = []; 
           this.isScaling = false;
@@ -101,23 +96,16 @@
           this.initialPinchDistance = 0;
           this.initialObjectScale = 1.0;
 
-          // 오디오 컨텍스트 변수
           this.audioCtx = null;
 
           // 4. UI 텍스트 설정
           this.setupTexts();
         }
 
-        /**
-         * "퐁!" 하는 경쾌한 방울 터지는 소리를 코드 기반으로 합성합니다.
-         */
         playPopSound() {
-          // 브라우저 호환성을 위한 네이티브 오디오 컨텍스트 초기화
           if (!this.audioCtx) {
             this.audioCtx = new (window.AudioContext || window.webkitAudioContext)();
           }
-          
-          // 사용자 동작으로 인해 오디오가 활성화될 수 있도록 처리
           if (this.audioCtx.state === 'suspended') {
             this.audioCtx.resume();
           }
@@ -126,18 +114,13 @@
           const oscillator = this.audioCtx.createOscillator();
           const gainNode = this.audioCtx.createGain();
 
-          // 소리 파형: 싸인파(Sine) - 둥글고 부드러운 소리
           oscillator.type = 'sine';
-          
-          // 주파수를 짧은 시간 안에 800Hz에서 200Hz로 급격히 떨어뜨려 "퐁" 소리 연출
           oscillator.frequency.setValueAtTime(800, t);
           oscillator.frequency.exponentialRampToValueAtTime(200, t + 0.15);
 
-          // 볼륨을 짧은 시간 안에 1.0에서 거의 0으로 빠르게 감소
           gainNode.gain.setValueAtTime(1.0, t);
           gainNode.gain.exponentialRampToValueAtTime(0.01, t + 0.15);
 
-          // 오디오 노드 연결 및 재생 (0.15초 길이)
           oscillator.connect(gainNode);
           gainNode.connect(this.audioCtx.destination);
           
@@ -145,9 +128,6 @@
           oscillator.stop(t + 0.15);
         }
 
-        /**
-         * 화면에 표시될 안내 문구 및 텍스트 객체들을 생성합니다.
-         */
         setupTexts() {
           const fontUrl = 'https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/packages/pretendard/dist/web/static/woff/Pretendard-Regular.woff';
           
@@ -160,7 +140,6 @@
             txt.anchorY = 'middle';
             txt.textAlign = 'center'; 
             txt.font = fontUrl;
-            // 안내 텍스트의 높이를 기존 0.45에서 0.3으로 낮춰 편안한 시야에 맞춥니다.
             txt.position.set(0, xb.core.user.height + 0.3, -xb.core.user.objectDistance);
             txt.sync();
             txt.visible = false;
@@ -172,7 +151,6 @@
           this.instTextStep2 = createInstructionText("드래그 기능을 익혀볼께요,\n버블을 바라보고 '핀치'를 유지한 상태로 이리저리 움직여보세요");
           this.instTextStep3 = createInstructionText("다음은 크기변환이에요,\n양 손으로 화면에 보이는 버블을 핀치한 상태에서\n두 손을 벌렸다가 모아보세요");
 
-          // 완료 및 인트로 텍스트 객체
           this.completionText = new Text();
           this.completionText.fontSize = 0.05;
           this.completionText.color = 0xffffff;
@@ -183,14 +161,10 @@
           this.completionText.fillOpacity = 0.0;
           this.completionText.font = fontUrl;
           this.completionText.visible = false;
-          // 완료 텍스트도 눈높이보다 약간 위쪽에 배치합니다.
           this.completionText.position.set(0, xb.core.user.height + 0.15, -xb.core.user.objectDistance);
           this.add(this.completionText);
         }
 
-        /**
-         * 현재 단계(Step)에 맞춰 구슬, 알약, 또는 육면체를 생성합니다.
-         */
         spawnObject() {
           const maxTasks = this.currentStep === 1 ? 5 : (this.currentStep === 2 ? 3 : 2);
           if (this.taskCount >= maxTasks) return;
@@ -207,13 +181,11 @@
             this.hasScaled = false;
           }
           
-          // 랜덤 색상 생성
           const randomHue = Math.random(); 
           const shellColor = new THREE.Color().setHSL(randomHue, 1.0, 0.4);
           const glowColor = new THREE.Color().setHSL(randomHue, 1.0, 0.6);
           const ringColor = new THREE.Color().setHSL(randomHue, 0.9, 0.7);
 
-          // 투명한 유리 껍질
           const shellMaterial = new THREE.MeshPhysicalMaterial({
             color: shellColor, 
             metalness: 0.1,
@@ -228,7 +200,6 @@
           
           this.activeObject = new THREE.Mesh(geometry, shellMaterial);
           
-          // 중심부 빛 덩어리
           const coreMaterial = new THREE.MeshBasicMaterial({
             color: 0xffffff, 
           });
@@ -236,7 +207,6 @@
           core.scale.set(0.15, 0.15, 0.15); 
           this.activeObject.add(core);
 
-          // 부드러운 후광
           const glowMaterial = new THREE.MeshBasicMaterial({
             color: glowColor, 
             transparent: true,
@@ -248,7 +218,6 @@
           glow.scale.set(0.4, 0.4, 0.4);
           this.activeObject.add(glow);
 
-          // 돌아가는 홀로그램 링
           const ringGeo = new THREE.CylinderGeometry(1.0, 1.0, 0.1, 32, 1, true);
           const ringMat = new THREE.MeshBasicMaterial({
             color: ringColor, 
@@ -260,11 +229,10 @@
           });
           this.innerRing = new THREE.Mesh(ringGeo, ringMat);
           
-          // 링이 각 도형의 바깥쪽 궤도를 돌 수 있도록 객체 껍질 크기보다 살짝 크게 스케일을 조정합니다.
           let ringScale = 0.095;
-          if (this.currentStep === 1) ringScale = 0.095; // 구슬 반경(0.08) 밖으로 돌게 설정
-          else if (this.currentStep === 2) ringScale = 0.08; // 알약 반경(0.06) 밖으로 돌게 설정
-          else if (this.currentStep === 3) ringScale = 0.12; // 육면체 밖으로 돌게 설정
+          if (this.currentStep === 1) ringScale = 0.095;
+          else if (this.currentStep === 2) ringScale = 0.08;
+          else if (this.currentStep === 3) ringScale = 0.12;
           
           this.innerRing.scale.set(ringScale, ringScale, ringScale);
           this.activeObject.add(this.innerRing);
@@ -293,14 +261,29 @@
           if (this.stepState !== 'PLAYING' || !this.activeObject || this.objectState === 'SPAWNING' || this.objectState === 'POPPING') return;
 
           const controller = event.target;
-          const intersection = xb.core.user.select(this.activeObject, controller);
           
+          // [수정 포인트 2] 하이브리드 레이캐스트 (시선 + 핸드)
+          // 1. 먼저 핸드 트래킹(컨트롤러)을 기준으로 객체를 가리켰는지 확인합니다.
+          let intersection = xb.core.user.select(this.activeObject, controller);
+          
+          // 2. 만약 손으로 가리키지 않았다면 -> 시선(카메라 중앙)으로 쳐다보고 있는지 추가로 검사합니다!
+          if (!intersection) {
+            const camera = xb.core.camera;
+            const raycaster = new THREE.Raycaster();
+            // 화면(사용자 시선)의 정중앙에서 레이저를 쏩니다.
+            raycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
+            const intersects = raycaster.intersectObject(this.activeObject, true);
+            if (intersects.length > 0) {
+              intersection = intersects[0];
+            }
+          }
+
           if (intersection) {
             if (this.currentStep === 1) {
               this.objectState = 'POPPING';
               this.popStartScale = this.activeObject.scale.x;
               this.animTimer = 0;
-              this.playPopSound(); // 1단계: 핀치하는 순간 효과음 재생
+              this.playPopSound(); 
             } else if (this.currentStep === 2) {
               this.objectState = 'DRAGGING';
               this.draggingController = controller;
@@ -330,7 +313,7 @@
               this.objectState = 'POPPING';
               this.popStartScale = this.activeObject.scale.x;
               this.animTimer = 0;
-              this.playPopSound(); // 2단계: 드래그 후 놓는 순간 효과음 재생
+              this.playPopSound(); 
             }
           } else if (this.currentStep === 3) {
             const index = this.pinchingControllers.indexOf(controller);
@@ -347,17 +330,20 @@
                 this.objectState = 'POPPING';
                 this.popStartScale = this.activeObject.scale.x;
                 this.animTimer = 0;
-                this.playPopSound(); // 3단계: 스케일 후 손을 놓는 순간 효과음 재생
+                this.playPopSound(); 
               }
             }
           }
         }
 
         update() {
+          // [수정 포인트 1] 사용자가 기기에서 Enter XR 버튼을 눌러 실제 XR 세션에 진입하기 전까지는 업데이트 로직(타이머)을 완전히 멈춥니다.
+          if (!xb.core.renderer.xr.isPresenting) return;
+
           const dt = Math.min(xb.getDeltaTime(), 0.05);
 
           // --------------------------------------------------
-          // 0단계: 앱 시작 인트로 시퀀스 (로딩 대기 시간 포함)
+          // 0단계: 앱 시작 인트로 시퀀스
           // --------------------------------------------------
           if (this.currentStep === 0) {
             this.animTimer += dt;
@@ -369,7 +355,9 @@
               }
             }
             else if (this.stepState === 'INTRO_DIMMING') {
-              this.dimmingSphere.material.opacity = Math.min(0.7, easeInOut(this.animTimer / 1.0) * 0.7);
+              // [수정 포인트 3] 패스스루 환경을 훨씬 더 어둡게! (최대 투명도 0.7 -> 0.95로 상향)
+              this.dimmingSphere.material.opacity = Math.min(0.95, easeInOut(this.animTimer / 1.0) * 0.95);
+              
               if (this.animTimer >= 1.0) {
                 this.stepState = 'INTRO_GAP1';
                 this.animTimer = 0;
@@ -478,7 +466,7 @@
           }
 
           // --------------------------------------------------
-          // 객 애니메이션 (생성 및 파괴) 로직
+          // 객체 애니메이션 (생성 및 파괴) 로직
           // --------------------------------------------------
           if (this.stepState === 'PLAYING' && this.activeObject) {
             if (this.objectState === 'SPAWNING') {
